@@ -1,0 +1,16 @@
+{
+    "notypeof"    : false,
+    "funcscope"   : false,
+    "singleGroups": true,
+    "varstmt"     : true,
+    "asi"         : false,
+    "boss"        : false,
+    "evil"        : false,
+    "supernew"    : false,
+    "withstmt"    : false,
+    "noyield"     : false,
+    "loopfunc"    : false,
+    "expr"        : false,
+    "latedef"     : true,
+    "esnext"      : true   // To be deprecated. Replace with "esversion": 6
+}
