@@ -35,8 +35,12 @@
                             service.getCharacteristic(RESET)]);
       }).then(characteristics => {
         console.log('Got characteristics');
+        let button = document.getElementById('start-button');
+        button.hidden = true;
         window.characteristics = characteristics;
         mocha.run();
+      }).catch(error => {
+        alert(error.name + ": " + error.message);
       });
   };
 })();
