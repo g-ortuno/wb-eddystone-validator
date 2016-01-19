@@ -3,10 +3,6 @@
 
   mocha.setup('bdd');
   window.startTest = () => {
-      mocha.run();
+    mocha.run();
   };
 })();
-
-
-
-
