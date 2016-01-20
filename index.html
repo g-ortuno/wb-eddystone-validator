@@ -3,6 +3,7 @@
   <head>
     <title>Eddystone URL Configuration Validator</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta charset="utf-8">
 
     <!-- Mocha Files for test runner -->
     <link rel="stylesheet" href="bower_components/mocha/mocha.css">
@@ -14,7 +15,7 @@
     <script src="setup.js"></script>
   </head>
   <body>
-    <button id="start-button" onclick="startTest();">Run Tests</button>
+    <button id="start-core-button" class="start" onclick="startCoreTest();">Run Core Eddystone Tests</button>
     <div id="mocha"></div>
     <script src="tests/core-eddystone-tests.js"></script>
   </body>
