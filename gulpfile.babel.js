@@ -8,14 +8,14 @@ gulp.task('test', [
 ]);
 
 gulp.task('test:jshint', () => {
-  return gulp.src(['gulpfile.babel.js', 'tests.js', 'setup.js'])
+  return gulp.src(['gulpfile.babel.js', 'tests/*.js', 'setup.js'])
     .pipe(jshint())
     .pipe(jshint.reporter('jshint-stylish'))
     .pipe(jshint.reporter('fail'));
 });
 
 gulp.task('test:jscs', () => {
-  return gulp.src(['gulpfile.babel.js', 'tests.js', 'setup.js'])
+  return gulp.src(['gulpfile.babel.js', 'tests/*.js', 'setup.js'])
     .pipe(jscs())
     .pipe(jscs.reporter());
 });

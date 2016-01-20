@@ -40,7 +40,7 @@
         window.characteristics = characteristics;
         mocha.run();
       }).catch(error => {
-        alert(error.name + ": " + error.message);
+        alert(error.name + ': ' + error.message);
       });
   };
 })();
