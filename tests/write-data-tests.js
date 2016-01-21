@@ -28,9 +28,27 @@
           done();
         });
     });
-    it('Write data 10 times', () => {
-      let write = () => global_data.writeValue(byte);
-      return expect(write().then(write()).then(write()).then(write())).to.be.fulfilled;
+    it('Write data 20 times', () => {
+      return expect(global_data.writeValue(byte)
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))
+        .then(() => global_data.writeValue(byte))).to.be.fulfilled;
     });
   });
 })();
