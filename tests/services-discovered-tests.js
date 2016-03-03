@@ -21,15 +21,13 @@
         done();
       }
     });
-    afterEach(() => {
-      // TODO(g-ortuno): Add disconnect after each test.
-    });
-    it('Services Discovered Test', function() {
+    it('Connect', function() {
       this.timeout(0);
-      return expect(global_device.connectGATT().then(g => {
-        global_server = g;
-        g.getPrimaryService(CONFIG_UUID);
-      })).to.be.fulfilled;
+      return expect(global_device.gatt.connect()).to.be.fulfilled;
+    });
+    it('Discover Services', function() {
+      this.timeout(0);
+      return expect(global_device.gatt.getPrimaryService(CONFIG_UUID)).to.be.fulfilled;
     });
   });
 })();
