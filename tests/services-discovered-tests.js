@@ -3,6 +3,7 @@
   let expect = chai.expect;
 
   const CONFIG_UUID = 'ee0c2080-8786-40ba-ab96-99b91ac981d8';
+  const TEST_UUID   = 'deadbeef-0000-0000-0000-000000000000'
   let global_device;
   let global_server;
 
@@ -27,7 +28,7 @@
     });
     it('Discover Services', function() {
       this.timeout(0);
-      return expect(global_device.gatt.getPrimaryService(CONFIG_UUID)).to.be.fulfilled;
+      return expect(global_device.gatt.getPrimaryService(TEST_UUID)).to.be.fulfilled;
     });
   });
 })();
