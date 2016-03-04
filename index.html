@@ -28,6 +28,9 @@
      #mocha .test.pass .duration {
        font-size: 20px;
      }
+     #test-output {
+       font-size: 20px;
+     }
     </style>
   </head>
   <body>
@@ -37,6 +40,7 @@
     </button>
     <button id="write-data-button" onclick="startWriteDataTest();">Write Data Test</button>
     <div id="mocha"></div>
+    <div id ="test-output"></div>
     <script src="tests/core-eddystone-tests.js"></script>
     <script src="tests/services-discovered-tests.js"></script>
     <script src="tests/write-data-tests.js"></script>
