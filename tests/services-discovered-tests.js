@@ -47,7 +47,7 @@
                   output_div.appendChild(service_uuid);
 
                   let characteristics_heading_text = document.createTextNode(
-                      'Characteristics:');
+                      'Characteristics (' + characteristics.length + '):');
                   let characteristics_heading = document.createElement('h4');
                   characteristics_heading.appendChild(
                       characteristics_heading_text);
