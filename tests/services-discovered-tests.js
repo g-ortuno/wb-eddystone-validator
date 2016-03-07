@@ -14,7 +14,8 @@
       this.timeout(0);
       if (!global_device) {
         navigator.bluetooth
-          .requestDevice({filters: [{services: [CONFIG_UUID]}]}).then(device => {
+          .requestDevice({filters: [{services: [CONFIG_UUID]}],
+                         optionalServices: [TEST_UUID]}).then(device => {
             global_device = device;
             done();
           });
