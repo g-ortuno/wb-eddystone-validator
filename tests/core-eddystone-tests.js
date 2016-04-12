@@ -1,36 +1,86 @@
 (() => {
   'use strict';
   let expect = chai.expect;
-  let toArray = (value) => {
+
+  let toUint8Array = (value) => {
     return Array.prototype.slice.call(new Uint8Array(value));
   };
-  let toArray16 = (value) => {
+  let toUint16Array = (value) => {
     return Array.prototype.slice.call(new Uint16Array(value));
   };
+  let toInt8Array = (value) => {
+    return Array.prototype.slice.call(new Int8Array(value));
+  }
 
-  const CONFIG_UUID = 'ee0c2080-8786-40ba-ab96-99b91ac981d8';
+  let toPropertiesArray = (properties) => {
+    let properties_array = [];
+    if (properties.broadcast)
+      properties_array.push('broadcast');
+    if (properties.read)
+      properties_array.push('read');
+    if (properties.writeWithoutResponse)
+      properties_array.push('writeWithoutResponse');
+    if (properties.write)
+      properties_array.push('write');
+    if (properties.notify)
+      properties_array.push('notify');
+    if (properties.indicate)
+      properties_array.push('indicate');
+    if (properties.authenticatedSignedWrites)
+      properties_array.push('authenticatedSignedWrites');
+    if (properties.reliableWrite)
+      properties_array.push('reliableWrite');
+    if (properties.writableAuxiliaries)
+      properties_array.push('writableAuxiliaries');
+    return properties_array;
+  }
 
-  const LOCK_STATE = 'ee0c2081-8786-40ba-ab96-99b91ac981d8';
-  const LOCK = 'ee0c2082-8786-40ba-ab96-99b91ac981d8';
-  const UNLOCK = 'ee0c2083-8786-40ba-ab96-99b91ac981d8';
-  const DATA = 'ee0c2084-8786-40ba-ab96-99b91ac981d8';
-  const FLAGS = 'ee0c2085-8786-40ba-ab96-99b91ac981d8';
-  const POWER_LEVELS = 'ee0c2086-8786-40ba-ab96-99b91ac981d8';
-  const POWER_MODE = 'ee0c2087-8786-40ba-ab96-99b91ac981d8';
-  const PERIOD = 'ee0c2088-8786-40ba-ab96-99b91ac981d8';
-  const RESET = 'ee0c2089-8786-40ba-ab96-99b91ac981d8';
 
-  let lockState = () => characteristics[0];
-  let lock = () => characteristics[1];
-  let unlock = () => characteristics[2];
-  let data = () => characteristics[3];
-  let flags = () => characteristics[4];
-  let powerLevels = () => characteristics[5];
-  let powerMode = () => characteristics[6];
-  let period = () => characteristics[7];
-  let reset = () => characteristics[8];
+  const CONFIG_UUID = 'a3c87500-8ed3-4bdf-8a39-a01bebede295';
 
-  describe('Core Eddystone-URL Tests', () => {
+  let capabilities = () => window.characteristics.get(
+    'a3c87501-8ed3-4bdf-8a39-a01bebede295');
+  let active_slot = () => window.characteristics.get(
+    'a3c87502-8ed3-4bdf-8a39-a01bebede295');
+  let advertising_interval = () => window.characteristics.get(
+    'a3c87503-8ed3-4bdf-8a39-a01bebede295');
+  let radio_tx_power = () => window.characteristics.get(
+    'a3c87504-8ed3-4bdf-8a39-a01bebede295');
+  let advertised_tx_power = () => window.characteristics.get(
+    'a3c87505-8ed3-4bdf-8a39-a01bebede295');
+  let lock_state = () => window.characteristics.get(
+    'a3c87506-8ed3-4bdf-8a39-a01bebede295');
+  let unlock = () => window.characteristics.get(
+    'a3c87507-8ed3-4bdf-8a39-a01bebede295');
+  let public_ecdh_key = () => window.characteristics.get(
+    'a3c87508-8ed3-4bdf-8a39-a01bebede295');
+  let eid_identity_key = () => window.characteristics.get(
+    'a3c87509-8ed3-4bdf-8a39-a01bebede295');
+  let adv_slot_data = () => window.characteristics.get(
+    'a3c8750A-8ed3-4bdf-8a39-a01bebede295');
+  let factory_reset = () => window.characteristics.get(
+    'a3c8750B-8ed3-4bdf-8a39-a01bebede295');
+  let remain_connectable = () => window.characteristics.get(
+    'a3c8750C-8ed3-4bdf-8a39-a01bebede295');
+  
+  window.BluetoothRemoteGATTServer.prototype.discoverService = function(service_uuid) {
+    let self = this;
+    return this.getPrimaryService(CONFIG_UUID)
+      .then(service => {
+        console.log('Service discovered...');
+        return service.getCharacteristics();
+      })
+      .then(characteristics => {
+        console.log('Characteristics discovered...');
+        this.characteristics = new Map();
+        for (let characteristic of characteristics) {
+          this.characteristics.set(characteristic.uuid, characteristic);
+        }
+        return this.characteristics;
+      });
+  };
+
+  describe('Core Eddystone-URL Tests', function() {
     before(function(done) {
       this.timeout(0);
       navigator.bluetooth
@@ -39,88 +89,70 @@
           return device.connectGATT();
         }).then(gattServer => {
           console.log('Connected to device...');
-          return gattServer.getPrimaryService(CONFIG_UUID);
-        }).then(service => {
-          console.log('Found service');
-          return Promise.all([service.getCharacteristic(LOCK_STATE),
-                              service.getCharacteristic(LOCK),
-                              service.getCharacteristic(UNLOCK),
-                              service.getCharacteristic(DATA),
-                              service.getCharacteristic(FLAGS),
-                              service.getCharacteristic(POWER_LEVELS),
-                              service.getCharacteristic(POWER_MODE),
-                              service.getCharacteristic(PERIOD),
-                              service.getCharacteristic(RESET)]);
+          return gattServer.discoverService(CONFIG_UUID);
         }).then(characteristics => {
-          console.log('Got characteristics');
           window.characteristics = characteristics;
           done();
         }).catch(error => {
           alert(error.name + ': ' + error.message);
         });
     });
-    beforeEach((done) => {
-      // Delay before each test until we figure out
-      // why we get a GATT operation in progress error.
-      setTimeout(done, 1000);
-    });
-    describe('Lock State', () => {
-      it('Read Lock State', () => {
-        return expect(lockState().readValue().then(toArray))
-          .to.eventually.deep.equal([0]);
+    
+    describe('Capabilities', function() {
+      it('Characteristic Properties', () => {
+        expect(toPropertiesArray(capabilities().properties))
+          .to.eql(['read']);
+      });
+      it('Length >= 7', function() {
+        this.timeout(0);
+        return expect(capabilities()
+          .readValue()
+          .then(val => toInt8Array(val)))
+          .to.eventually.have.length.of.at.least(6);
+      });
+      it('Version should be 0x00', function() {
+        this.timeout(0);
+        return expect(capabilities()
+          .readValue()
+          .then(val => toInt8Array(val)[0]))
+          .to.eventually.equal(0x00);
       });
     });
-    describe('Reset', () => {
-      it('Write Reset', () => {
-        return expect(reset().writeValue(new Uint8Array([1])))
-          .to.be.fulfilled;
+
+    describe('Active Slot', function() {
+      it('Characteristic Properties', function() {
+        this.timeout(0);
+        expect(toPropertiesArray(active_slot().properties))
+          .to.eql(['read', 'write']);
+      });
+      it('Write and Read [1]', function() {
+        this.timeout(0);
+        return expect(active_slot()
+          .writeValue(new Uint8Array([1]))
+          .then(() => active_slot().readValue())
+          .then(val => toUint8Array(val)))
+          .to.eventually.eql([1]);
+      });
+      it('Write and Read [0]', function() {
+        this.timeout(0);
+        return expect(active_slot()
+          .writeValue(new Uint8Array([0]))
+          .then(() => active_slot().readValue())
+          .then(val => toUint8Array(val)))
+          .to.eventually.eql([0]);
       });
     });
-    describe('Data', () => {
-      it('Write Data', () => {
-        return expect(data().writeValue(new Uint8Array([0,0])))
-          .to.be.fulfilled;
+
+    describe('Advertising Interval', function() {
+      it('Characteristic Properties', function() {
+        this.timeout(0);
+        expect(toPropertiesArray(advertising_interval().properties))
+          .to.eql(['read', 'write']);
       });
-      it('Read Data', () => {
-        return expect(data().readValue().then(toArray))
-          .to.eventually.deep.equal([0, 0]);
-      });
-    });
-    describe('Tx Power Levels', () => {
-      const TX_POWER_LEVELS = [1, 2, 3, 4];
-      it('Write Levels', () => {
-        return expect(powerLevels().writeValue(new Uint8Array(TX_POWER_LEVELS)))
-          .to.be.fulfilled;
-      });
-      it('Read Levels', () => {
-        return expect(powerLevels().readValue().then(toArray))
-          .to.eventually.deep.equal(TX_POWER_LEVELS);
-      });
-    });
-    describe('Tx Power Mode', () => {
-      it('Write Mode', () => {
-        return expect(powerMode().writeValue(new Uint8Array([0])))
-          .to.be.fulfilled;
-      });
-      it('Read Mode', () => {
-        return expect(powerMode().readValue().then(toArray))
-          .to.eventually.deep.equal([0]);
-      });
-    });
-    describe('Period', () => {
-      it('Write Period', () => {
-        return expect(period().writeValue(new Uint16Array([1000])))
-          .to.be.fulfilled;
-      });
-      it('Write and read Period', () => {
-        return expect(period().readValue().then(toArray16))
-          .to.eventually.deep.equal([1000]);
-      });
-    });
-    describe('Reset to defaults', () => {
-      it('Write Reset', () => {
-        return expect(reset().writeValue(new Uint8Array([1])))
-          .to.be.fulfilled;
+      it('Read', function() {
+        this.timeout(0);
+        return expect(active_slot().readValue()
+          .then(val => console.log(toUint16Array(val))));
       });
     });
   });
