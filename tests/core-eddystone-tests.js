@@ -131,19 +131,19 @@
           .then(toInt8Array))
           .to.eventually.have.length.of.at.least(6);
       });
-      it('Version should be 0x00', function() {
+      it('Version should be 0x01', function() {
         this.timeout(0);
         return expect(capabilities()
           .readValue()
           .then(val => toInt8Array(val)[0]))
-          .to.eventually.equal(0x00);
+          .to.eventually.equal(0x01);
       });
       it('Capabilities bit field RFU', function() {
         this.timeout(0);
         return expect(capabilities()
           .readValue()
-          .then(val => !!(toInt8Array(val)[4] & 0b11111000)))
-          .to.eventually.be.true;
+          .then(val => !!(toInt8Array(val)[3] & 0b11111000)))
+          .to.eventually.be.false;
       });
       it('Cache Capabilities', function() {
         return expect(getCapabilities().then(c => caps_obj = c))
