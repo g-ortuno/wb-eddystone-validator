@@ -100,6 +100,8 @@
       });
   };
 
+  window.BluetoothRemoteGATTCharacteristic
+
   describe('Core Eddystone-URL Tests', function() {
     let caps_obj;
     before(function(done) {
@@ -107,6 +109,7 @@
       navigator.bluetooth
         .requestDevice({filters: [{services: [CONFIG_UUID]}]}).then(device => {
           console.log('Found device...');
+          window.device = device;
           return device.connectGATT();
         }).then(gattServer => {
           console.log('Connected to device...');
@@ -136,7 +139,7 @@
         return expect(capabilities()
           .readValue()
           .then(val => toInt8Array(val)[0]))
-          .to.eventually.equal(0x01);
+          .to.eventually.equal(0x00);
       });
       it('Capabilities bit field RFU', function() {
         this.timeout(0);
@@ -157,28 +160,38 @@
         expect(toPropertiesArray(active_slot()))
           .to.eql(['read', 'write']);
       });
-      // TODO WRITE MOAR
-      it('Write and Read [1]', function() {
+
+      it('Write and Read', function() {
         this.timeout(0);
-        return expect(active_slot()
-          .writeValue(new Uint8Array([1]))
-          .then(() => active_slot().readValue())
-          .then(toUint8Array))
-          .to.eventually.eql([1]);
+        this.test.title += ' (' + caps_obj.max_supported_total_slots +
+                           ' slots)';
+        let values_read = [];
+        let values_written = [];
+        let test_promise = Promise.resolve();
+        for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+          values_written.push([i]);
+          test_promise = test_promise
+            .then(() => active_slot().writeValue(new Uint8Array([i])))
+            .then(() => active_slot().readValue())
+            .then(toUint8Array)
+            .then(value => values_read.push(value));
+        }
+        test_promise = test_promise.then(() => values_read);
+        return expect(test_promise).to.eventually.eql(values_written);
       });
-      it('Write and Read [0]', function() {
-        this.timeout(0);
-        return expect(active_slot()
-          .writeValue(new Uint8Array([0]))
-          .then(() => active_slot().readValue())
-          .then(toUint8Array))
-          .to.eventually.eql([0]);
-      });
+
       it('Write a value bigger than what the capabilities allow', function() {
         this.timeout(0);
         return expect(active_slot()
-          .writeValue(new Uint8Array([caps_obj.max_supported_total_slots + 1])))
+          .writeValue(new Uint8Array([caps_obj.max_supported_total_slots])))
         .to.be.rejected;
+      });
+
+      it('Write a value with wrong length', function() {
+        this.timeout(0);
+        return expect(active_slot()
+          .writeValue(new Uint8Array([0, 0])))
+          .to.be.rejected;
       });
     });
     describe('Advertising Interval', function() {
@@ -194,13 +207,18 @@
           this.test.title = 'Write (Variable Adv)';
           let test_promise = Promise.resolve();
           for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
-            let val = [500 + i];
+            let val = 500 + i;
+            // TODO: Find a better way to write big endian.
+            let dataView = new DataView(new ArrayBuffer(2));
+            dataView.setInt16(0, val, false);
             values_written.push(val);
             test_promise = test_promise
               .then(() => active_slot().writeValue(new Uint8Array([i])))
-              .then(() => advertising_interval().writeValue(new Uint16Array(val)));
+              .then(() => advertising_interval().writeValue(dataView));
           }
           return expect(test_promise).to.be.fulfilled;
+        } else {
+          return expect(Promise.reject()).to.be.fulfilled;
         }
       });
       it('Read', function() {
@@ -213,11 +231,71 @@
             test_promise = test_promise
               .then(() => active_slot().writeValue(new Uint8Array([i])))
               .then(() => advertising_interval().readValue())
-              .then(toUint16Array)
+              .then(val => val.getInt16(0, false))
               .then(value => values_read.push(value));
           }
           return expect(test_promise.then(() => values_read))
             .to.eventually.eql(values_written);
+        } else {
+          return expect(Promise.reject()).to.be.fulfilled;
+        }
+      });
+
+      it('Write and Read Min', function() {
+        this.timeout(0);
+        if (caps_obj.capabilities.variable_adv_supported) {
+          let base_value = new DataView(new ArrayBuffer(2));
+          base_value.setInt16(0, 1000, false);
+          let min_value = new DataView(new ArrayBuffer(2));
+          min_value.setInt16(0, 1, false);
+
+          let test_promise = Promise.resolve();
+          let min_values_written = [];
+          let base_values_written = [];
+          let min_values_read = [];
+          let base_values_read = [];
+
+          let reset = () => {
+            let promise = Promise.resolve();
+            for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+              promise = promise.then(() => active_slot().writeValue(new Uint8Array([i])))
+                .then(() => advertising_interval().writeValue(base_value));
+            }
+            return promise;
+          };
+
+          for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+            test_promise = test_promise.then(() => reset());
+            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+              if (i === j) {
+                test_promise = test_promise
+                  .then(() => active_slot().writeValue(new Uint8Array([j])))
+                  .then(() => advertising_interval().writeValue(min_value));
+                min_values_written.push(min_value.getInt16(0, false));
+              } else {
+                base_values_written.push(base_value.getInt16(0, false));
+              }
+            }
+            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+              test_promise = test_promise
+                .then(() => active_slot().writeValue(new Uint8Array([j])))
+                .then(() => advertising_interval().readValue())
+                .then(val => {
+                  if (i === j) {
+                    min_values_read.push(val.getInt16(0, false));
+                  } else {
+                    base_values_read.push(val.getInt16(0, false));
+                  }
+                });
+            }
+          }
+          return Promise.all([
+            expect(test_promise.then(() => min_values_read))
+              .to.eventually.not.eql(min_values_written),
+            expect(test_promise.then(() => base_values_read))
+              .to.eventually.eql(base_values_written)]);
+        } else {
+          return expect(Promise.reject()).to.be.fulfilled;
         }
       });
     });
