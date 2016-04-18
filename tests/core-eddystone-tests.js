@@ -2,7 +2,7 @@
   'use strict';
   let expect = chai.expect;
 
-  let toUint8Array = (value) => {
+  let toUint8Array = (value, bigEndian = false) => {
     return Array.prototype.slice.call(new Uint8Array(value.buffer));
   };
   let toUint16Array = (value) => {
@@ -10,6 +10,21 @@
   };
   let toInt8Array = (value) => {
     return Array.prototype.slice.call(new Int8Array(value.buffer));
+  }
+
+  let getHalf = (encrypted) => {
+    let array = toUint8Array(new Uint8Array(encrypted));
+    var half_length = Math.ceil(array.length / 2);
+    return new Uint8Array(array.slice(0, half_length).reverse());
+  }
+
+  let getUint8Array = (value) => {
+    return toUint8Array(new Uint8Array(value));
+  }
+
+  let reverse = (dataview) => {
+    let array = toUint8Array(new Uint8Array(dataview.buffer));
+    return new Uint8Array(array.reverse());
   }
 
   let toPropertiesArray = (characteristic) => {
@@ -100,8 +115,6 @@
       });
   };
 
-  window.BluetoothRemoteGATTCharacteristic
-
   describe('Core Eddystone-URL Tests', function() {
     let caps_obj;
     before(function(done) {
@@ -122,7 +135,7 @@
         });
     });
 
-    describe('Capabilities', function() {
+    describe.skip('Capabilities', function() {
       it('Characteristic Properties', () => {
         expect(toPropertiesArray(capabilities()))
           .to.eql(['read']);
@@ -154,7 +167,7 @@
       });
     });
 
-    describe('Active Slot', function() {
+    describe.skip('Active Slot', function() {
       it('Characteristic Properties', function() {
         this.timeout(0);
         expect(toPropertiesArray(active_slot()))
@@ -194,7 +207,7 @@
           .to.be.rejected;
       });
     });
-    describe('Advertising Interval', function() {
+    describe.skip('Advertising Interval', function() {
       it('Characteristic Properties', function() {
         this.timeout(0);
         expect(toPropertiesArray(advertising_interval()))
@@ -250,7 +263,6 @@
           min_value.setInt16(0, 1, false);
 
           let test_promise = Promise.resolve();
-          let min_values_written = [];
           let base_values_written = [];
           let min_values_read = [];
           let base_values_read = [];
@@ -271,7 +283,6 @@
                 test_promise = test_promise
                   .then(() => active_slot().writeValue(new Uint8Array([j])))
                   .then(() => advertising_interval().writeValue(min_value));
-                min_values_written.push(min_value.getInt16(0, false));
               } else {
                 base_values_written.push(base_value.getInt16(0, false));
               }
@@ -291,13 +302,177 @@
           }
           return Promise.all([
             expect(test_promise.then(() => min_values_read))
-              .to.eventually.not.eql(min_values_written),
+              .to.eventually.not.include(1),
             expect(test_promise.then(() => base_values_read))
               .to.eventually.eql(base_values_written)]);
         } else {
           return expect(Promise.reject()).to.be.fulfilled;
         }
       });
+      it('Write and Read Max', function() {
+        this.timeout(0);
+        if (caps_obj.capabilities.variable_adv_supported) {
+          let base_value = new DataView(new ArrayBuffer(2));
+          base_value.setInt16(0, 1000, false);
+          let max_value = new DataView(new ArrayBuffer(2));
+          max_value.setInt16(0, 0xffff, false);
+
+          let test_promise = Promise.resolve();
+          let base_values_written = [];
+          let max_values_read = [];
+          let base_values_read = [];
+
+          let reset = () => {
+            let promise = Promise.resolve();
+            for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+              promise = promise.then(() => active_slot().writeValue(new Uint8Array([i])))
+                .then(() => advertising_interval().writeValue(base_value));
+            }
+            return promise;
+          };
+
+          for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+            test_promise = test_promise.then(() => reset());
+            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+              if (i === j) {
+                test_promise = test_promise
+                  .then(() => active_slot().writeValue(new Uint8Array([j])))
+                  .then(() => advertising_interval().writeValue(max_value));
+              } else {
+                base_values_written.push(base_value.getInt16(0, false));
+              }
+            }
+            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+              test_promise = test_promise
+                .then(() => active_slot().writeValue(new Uint8Array([j])))
+                .then(() => advertising_interval().readValue())
+                .then(val => {
+                  if (i === j) {
+                    max_values_read.push(val.getInt16(0, false));
+                  } else {
+                    base_values_read.push(val.getInt16(0, false));
+                  }
+                });
+            }
+          }
+          return Promise.all([
+            expect(test_promise.then(() => max_values_read))
+              .to.eventually.not.include(0xffff),
+            expect(test_promise.then(() => base_values_read))
+              .to.eventually.eql(base_values_written)]);
+        } else {
+          return expect(Promise.reject()).to.be.fulfilled;
+        }
+      });
+      it('Disable', function() {
+        this.timeout(0);
+        if (caps_obj.capabilities.variable_adv_supported) {
+          let base_value = new DataView(new ArrayBuffer(2));
+          base_value.setInt16(0, 1000, false);
+          let disable_value = new DataView(new ArrayBuffer(2));
+          disable_value.setInt16(0, 0, false);
+
+          let test_promise = Promise.resolve();
+          let values_written = [];
+          let values_read = [];
+
+          let reset = () => {
+            let promise = Promise.resolve();
+            for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+              promise = promise.then(() => active_slot().writeValue(new Uint8Array([i])))
+                .then(() => advertising_interval().writeValue(base_value));
+            }
+            return promise;
+          };
+
+          for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+            test_promise = test_promise.then(() => reset());
+            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+              if (i === j) {
+                test_promise = test_promise
+                  .then(() => active_slot().writeValue(new Uint8Array([j])))
+                  .then(() => advertising_interval().writeValue(disable_value));
+                values_written.push(0);
+              } else {
+                values_written.push(1000);
+              }
+            }
+            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+              test_promise = test_promise
+                .then(() => active_slot().writeValue(new Uint8Array([j])))
+                .then(() => advertising_interval().readValue())
+                .then(val => {
+                  values_read.push(val.getInt16(0, false));
+                });
+            }
+          }
+          return expect(test_promise.then(() => values_read))
+            .to.eventually.eql(values_written);
+        } else {
+          return expect(Promise.reject()).to.be.fulfilled;
+        }
+      });
+    });
+
+    describe('Lock', function() {
+      this.timeout(0);
+      it('Unlocked', function() {
+        return expect(lock_state().readValue().then(toUint8Array))
+                                  .to.eventually.eql([1]);
+      });
+
+      it('Lock', function() {
+        return expect(lock_state()
+            .writeValue(new Uint8Array([0]))
+            .then(() => lock_state().readValue())
+            .then(toUint8Array))
+          .to.eventually.eql([0]);
+      });
+
+      it('Challenge is different', function() {
+        let val1;
+        let val2;
+        return expect(unlock()
+            .readValue()
+            .then(toInt8Array)
+            .then(val => val1 = val)
+            .then(() => unlock().readValue())
+            .then(toInt8Array)
+            .then(val => val2 = val)
+            .then(() => console.log(val1))
+            .then(() => console.log(val2))
+            .then(() => val2)).to.eventually.not.be.eql(val1);
+      });
+
+      it('Unlock', function() {
+        let key;
+        let data;
+        let encrypted;
+        let key_array = new Uint8Array(16);
+        
+        
+        let test_promise = window
+          .crypto.subtle.importKey(
+            'raw', key_array.buffer, {name: 'aes-cbc'},
+            true, ["encrypt"])
+          .then(k => key = k)
+          .then(() => unlock().readValue())
+          .then(reverse)
+          .then(d => data = d)
+          .then(() => window.crypto.subtle.encrypt(
+            {
+              name: 'aes-cbc',
+              iv: key_array.buffer
+            }, key, data))
+          .then(getHalf)
+          .then(e => encrypted = e)
+          .then(() => console.log(toInt8Array(data)))
+          .then(() => console.log(toInt8Array(encrypted)))
+          .then(() => unlock().writeValue(encrypted))
+          .then(() => lock_state().readValue().then(toUint8Array));
+
+        return expect(test_promise).to.eventually.eql([1]);
+      });            
     });
   });
 })();
