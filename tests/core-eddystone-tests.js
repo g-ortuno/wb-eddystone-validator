@@ -5,26 +5,73 @@
   let toUint8Array = (value, bigEndian = false) => {
     return Array.prototype.slice.call(new Uint8Array(value.buffer));
   };
+
   let toUint16Array = (value) => {
     return Array.prototype.slice.call(new Uint16Array(value.buffer));
   };
+
   let toInt8Array = (value) => {
     return Array.prototype.slice.call(new Int8Array(value.buffer));
-  }
+  };
 
   let getHalf = (encrypted) => {
     let array = toUint8Array(new Uint8Array(encrypted));
     var half_length = Math.ceil(array.length / 2);
     return new Uint8Array(array.slice(0, half_length).reverse());
-  }
+  };
 
   let getUint8Array = (value) => {
     return toUint8Array(new Uint8Array(value));
-  }
+  };
 
   let reverse = (dataview) => {
     let array = toUint8Array(new Uint8Array(dataview.buffer));
     return new Uint8Array(array.reverse());
+  };
+
+  let encrypt = (key, data) => {
+    //console.log('Key');
+    //console.log(toUint8Array(key));
+    //console.log('Data');
+    //console.log(toUint8Array(data));
+    return window.crypto.subtle.importKey('raw', key, {name: 'aes-cbc'}, true, ['encrypt'])
+      .then(k => window.crypto.subtle.encrypt({name: 'aes-cbc', iv: new Uint8Array(16)}, k, data))
+      .then(getHalf)
+      .then(encrypted_data => {
+        // console.log('Encrypted');
+        // console.log(encrypted_data);
+        return encrypted_data;
+      });
+  };
+
+  let getLockValue = (old_key, new_key) => {
+    return encrypt(old_key, new_key)
+      .then(reverse)
+      .then(toUint8Array)
+      .then(e => {
+        let val = [0, ...e];
+        console.log('Old Key');
+        console.log(toUint8Array(old_key));
+        console.log('New Key');
+        console.log(toUint8Array(new_key));
+        console.log('Lock value');
+        console.log(val);
+        return new Uint8Array(val);
+      });
+  };
+
+  function arraysEqual(a, b) {
+    if (a === b) return true;
+    if (a == null || b == null) return false;
+    if (a.length != b.length) return false;
+
+    // If you don't care about the order of the elements inside
+    // the array, you should sort both arrays here.
+
+    for (var i = 0; i < a.length; ++i) {
+      if (a[i] !== b[i]) return false;
+    }
+    return true;
   }
 
   let toPropertiesArray = (characteristic) => {
@@ -415,18 +462,19 @@
     });
 
     describe('Lock', function() {
-      this.timeout(0);
+      it('Lock State Properties', () => {
+        expect(toPropertiesArray(lock_state()))
+          .to.eql(['read', 'write']);
+      });
+
+      it('Unlock Properties', () => {
+        expect(toPropertiesArray(unlock()))
+          .to.eql(['read', 'write']);
+      });
+
       it('Unlocked', function() {
         return expect(lock_state().readValue().then(toUint8Array))
                                   .to.eventually.eql([1]);
-      });
-
-      it('Lock', function() {
-        return expect(lock_state()
-            .writeValue(new Uint8Array([0]))
-            .then(() => lock_state().readValue())
-            .then(toUint8Array))
-          .to.eventually.eql([0]);
       });
 
       it('Challenge is different', function() {
@@ -444,35 +492,71 @@
             .then(() => val2)).to.eventually.not.be.eql(val1);
       });
 
-      it('Unlock', function() {
-        let key;
-        let data;
-        let encrypted;
-        let key_array = new Uint8Array(16);
-        
-        
-        let test_promise = window
-          .crypto.subtle.importKey(
-            'raw', key_array.buffer, {name: 'aes-cbc'},
-            true, ["encrypt"])
-          .then(k => key = k)
+      it.skip('Lock', function() {
+        return expect(lock_state()
+            .writeValue(new Uint8Array([0]))
+            .then(() => lock_state().readValue())
+            .then(toUint8Array))
+          .to.eventually.eql([0]);
+      });
+
+      it.skip('Unlock', function() {
+        let key = new Uint8Array(16);
+
+        let test_promise = Promise.resolve()
           .then(() => unlock().readValue())
+          .then(data => encrypt(key, data))
           .then(reverse)
-          .then(d => data = d)
-          .then(() => window.crypto.subtle.encrypt(
-            {
-              name: 'aes-cbc',
-              iv: key_array.buffer
-            }, key, data))
-          .then(getHalf)
-          .then(e => encrypted = e)
-          .then(() => console.log(toInt8Array(data)))
-          .then(() => console.log(toInt8Array(encrypted)))
-          .then(() => unlock().writeValue(encrypted))
-          .then(() => lock_state().readValue().then(toUint8Array));
+          .then(unlock_token => unlock().writeValue(unlock_token))
+          .then(() => lock_state().readValue())
+          .then(toUint8Array);
 
         return expect(test_promise).to.eventually.eql([1]);
-      });            
+      });
+
+      const TEST_KEY = [0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5];
+
+      it.skip('Lock with key', function() {
+        this.timeout(0);
+        let old_key = new Uint8Array(16);
+        let new_key = new Uint8Array(TEST_KEY);
+
+        let test_promise = Promise.resolve()
+          .then(() => getLockValue(old_key, new_key))
+          .then(val => lock_state().writeValue(val))
+          .then(() => lock_state().readValue())
+          .then(toUint8Array);
+
+        return expect(test_promise).to.eventually.eql([0]);
+      });
+
+      it.skip('Unlock with Key', function() {
+        this.timeout(0);
+        let key = new Uint8Array(TEST_KEY);
+
+        let test_promise = Promise.resolve()
+            .then(() => unlock().readValue())
+            .then(data => encrypt(key, data))
+            .then(reverse)
+            .then(unlock_token => {
+              console.log('Generated token');
+              console.log(toUint8Array(unlock_token));
+              return unlock().writeValue(unlock_token);
+            })
+            .then(() => lock_state().readValue())
+            .then(toUint8Array);
+        return expect(test_promise).to.eventually.eql([1]);
+      });
+
+      [2, 16, 18].forEach(length => {
+        it('Write length ' + length, function() {
+          this.timeout(0);
+          let test_promise = Promise.resolve()
+              .then(() => lock_state().readValue())
+              .then(() => lock_state().writeValue(new Uint8Array(length)))
+          return expect(test_promise).to.be.rejected;
+        });
+      });
     });
   });
 })();
