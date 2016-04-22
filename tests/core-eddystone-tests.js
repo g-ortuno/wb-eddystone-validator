@@ -61,29 +61,15 @@
       .then(toUint8Array)
       .then(e => {
         let val = [0, ...e];
-        console.log('Old Key');
-        console.log(toUint8Array(old_key));
-        console.log('New Key');
-        console.log(toUint8Array(new_key));
-        console.log('Lock value');
-        console.log(val);
+        /* console.log('Old Key');
+           console.log(toUint8Array(old_key));
+           console.log('New Key');
+           console.log(toUint8Array(new_key));
+           console.log('Lock value');
+           console.log(val); */
         return new Uint8Array(val);
       });
   };
-
-  function arraysEqual(a, b) {
-    if (a === b) return true;
-    if (a == null || b == null) return false;
-    if (a.length != b.length) return false;
-
-    // If you don't care about the order of the elements inside
-    // the array, you should sort both arrays here.
-
-    for (var i = 0; i < a.length; ++i) {
-      if (a[i] !== b[i]) return false;
-    }
-    return true;
-  }
 
   let toPropertiesArray = (characteristic) => {
     let properties = characteristic.properties;
@@ -148,10 +134,12 @@
             'capabilities': {
               'variable_adv_supported': !!(val[3] & 0x01),
               'variable_tx_power_supported': !!(val[3] & 0x02),
-              'updated_key_unencrypted': !!(val[3] & 0x04)
+              'update_key_unencrypted': !!(val[3] & 0x04)
             },
             'supported_frame_types_bit_field': (() => {
-              let supported_frame_types_bits = (val[5] << 4) | val[4];
+              console.log(val[4].toString(2));
+              console.log(val[5].toString(2));
+              let supported_frame_types_bits = (val[4] << 4) | val[5];
               let array = [];
 
               if (!!(supported_frame_types_bits & 0x01))
@@ -168,22 +156,45 @@
             })(),
             'supported_radio_tx_power': val.slice(6)
           };
-          console.log(caps);
           return caps;
         });
   };
 
-  const EXPECTED_CAPABILITIES = {
+  let changeToSlot = i => {
+    return active_slot().writeValue(new Uint8Array([i]));
+  }
+
+  let toAdvData = val => {
+    let v = toInt8Array(val);
+    let adv_data = {};
+    // 0x00 (UID), 0x10 (URL), 0x20 (TLM), 0x30 (EID)
+    if (v[0] === 0x00)
+      adv_data.frame_type = 'uid';
+    else if (v[0] === 0x10)
+      adv_data.frame_type = 'url';
+    else if (v[0] === 0x20)
+      adv_data.frame_type = 'tlm';
+    else if (v[0] === 0x30)
+      adv_data.frame_type = 'eid';
+    else
+      adv_data.frame_type = 'unknown';
+
+    adv_data.data = v.slice(1);
+    return adv_data;
+  }
+
+
+  const expected_capabilities = {
     'version': 0x00,
     'max_supported_total_slots': 0x03,
-    'max_supported_eid_slots': 0x03,
+    'max_supported_eid_slots': 0x00,
     'capabilities': {
       'variable_adv_supported': true,
       'variable_tx_power_supported': true,
-      'update_key_unencryped': false
+      'update_key_unencrypted': false
     },
-    'supported_frame_types_bit_field': ['uid', 'url', 'tlm', 'eid'],
-    'supported_radio_tx_power': []
+    'supported_frame_types_bit_field': ['uid', 'url', 'tlm'],
+    'supported_radio_tx_power': [-30, -16, -4, 4]
   };
 
   window.BluetoothRemoteGATTServer.prototype.discoverService = function(service_uuid) {
@@ -194,11 +205,9 @@
         return service.getCharacteristics();
       })
       .then(characteristics => {
-        console.log('Characteristics discovered...');
         this.characteristics = new Map();
         for (let characteristic of characteristics) {
           this.characteristics.set(characteristic.uuid, characteristic);
-          console.log('Characteristic discovered: ' + characteristic.uuid);
         }
         return this.characteristics;
       });
@@ -232,12 +241,19 @@
         });
     });
 
+    after(function(done) {
+      this.timeout(0);
+      factory_reset().writeValue(new Uint8Array([0x0b])).then(done);
+    });
+
     describe('Factory Reset', function() {
       it('Characteristic Properties', () => {
         expect(toPropertiesArray(factory_reset()))
           .to.eql(['write']);
       });
-      it('Cache default values', () => {
+
+      it('Cache default values', function() {
+        this.timeout(0);
         let test_promise = factory_reset().writeValue(new Uint8Array([0x0b]))
             .then(() => getCapabilities())
             .then(c => cached.capabilities = c)
@@ -272,8 +288,18 @@
             .then(() => lock_state().readValue())
             .then(toLockState)
             .then(val => cached.lock_state = val)
-        
-
+            .then(() => {
+              let a_promise = Promise.resolve();
+              for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
+                a_promise = a_promise
+                  .then(() => changeToSlot(i))
+                  .then(() => adv_slot_data().readValue())
+                  .then(toAdvData)
+                  .then(d => cached.adv_slot_data.push(d));
+              }
+              return a_promise;
+            })
+            .then(() => console.log(cached));
         return expect(test_promise).to.be.fulfilled;
       });
     });
@@ -283,17 +309,13 @@
         expect(toPropertiesArray(capabilities()))
           .to.eql(['read']);
       });
+
       it('Length >= 7', function() {
         this.timeout(0);
         return expect(capabilities()
           .readValue()
           .then(toInt8Array))
           .to.eventually.have.length.of.at.least(6);
-      });
-
-      it('Check Capabilities', function() {
-        this.timeout(0);
-        return expect(getCapabilities()).to.eventually.eql(EXPECTED_CAPABILITIES);
       });
 
       it('Capabilities bit field RFU', function() {
@@ -303,9 +325,60 @@
           .then(val => !!(toInt8Array(val)[3] & 0b11111000)))
           .to.eventually.be.false;
       });
+
+      it('Version', function() {
+        this.timeout(0);
+        return expect(getCapabilities()
+          .then(c => c.version))
+          .to.eventually.eql(expected_capabilities.version);
+      });
+
+      it('Max Supported Total Slots', function() {
+        this.timeout(0);
+        return expect(getCapabilities()
+          .then(c => c.max_supported_total_slots))
+          .to.eventually.eql(expected_capabilities.max_supported_total_slots);
+      });
+      
+      it('Max Supported EID Slots', function() {
+        this.timeout(0);
+        return expect(getCapabilities()
+          .then(c => c.max_supported_eid_slots))
+          .to.eventually.eql(expected_capabilities.max_supported_eid_slots);
+      });
+
+      it('Capabilities', function() {
+        this.timeout(0);
+        let caps = getCapabilities().then(c => c.capabilities);
+
+        return Promise.all([
+          expect(caps
+            .then(c => c.variable_adv_supported))
+            .to.eventually.eql(expected_capabilities.capabilities.variable_adv_supported),
+          expect(caps
+            .then(c => c.variable_tx_power_supported))
+            .to.eventually.eql(expected_capabilities.capabilities.variable_tx_power_supported),
+          expect(caps
+            .then(c => c.update_key_unencrypted))
+            .to.eventually.eql(expected_capabilities.capabilities.update_key_unencrypted)]);
+      });
+
+      it('Supported Frame Types Bit Field', function() {
+        this.timeout(0);
+        return expect(getCapabilities()
+          .then(c => c.supported_frame_types_bit_field))
+          .to.eventually.eql(expected_capabilities.supported_frame_types_bit_field);
+      });
+
+      it('Supported Radio Tx Power', function() {
+        this.timeout(0);
+        return expect(getCapabilities()
+          .then(c => c.supported_radio_tx_power))
+          .to.eventually.eql(expected_capabilities.supported_radio_tx_power);
+      });
     });
 
-    describe.skip('Active Slot', function() {
+    describe('Active Slot', function() {
       it('Characteristic Properties', function() {
         this.timeout(0);
         expect(toPropertiesArray(active_slot()))
@@ -345,7 +418,7 @@
           .to.be.rejected;
       });
     });
-    describe.skip('Advertising Interval', function() {
+    describe('Advertising Interval', function() {
       it('Characteristic Properties', function() {
         this.timeout(0);
         expect(toPropertiesArray(advertising_interval()))
@@ -571,6 +644,15 @@
                                   .to.eventually.eql([1]);
       });
 
+      it('Read Unlock while unlocked', function() {
+        return expect(unlock().readValue()).to.be.rejected;
+      });
+
+      it('Write Unlock while unlocked', function() {
+        return expect(unlock().writeValue(new Uint8Array(16)))
+          .to.be.rejected;
+      });
+
       it('Challenge is different', function() {
         let val1;
         let val2;
@@ -581,12 +663,10 @@
             .then(() => unlock().readValue())
             .then(toInt8Array)
             .then(val => val2 = val)
-            .then(() => console.log(val1))
-            .then(() => console.log(val2))
             .then(() => val2)).to.eventually.not.be.eql(val1);
       });
 
-      it.skip('Lock', function() {
+      it('Lock', function() {
         return expect(lock_state()
             .writeValue(new Uint8Array([0]))
             .then(() => lock_state().readValue())
@@ -594,7 +674,17 @@
           .to.eventually.eql([0]);
       });
 
-      it.skip('Unlock', function() {
+      [2, 16, 18].forEach(length => {
+        it('Write length ' + length, function() {
+          this.timeout(0);
+          let test_promise = Promise.resolve()
+              .then(() => lock_state().readValue())
+              .then(() => lock_state().writeValue(new Uint8Array(length)))
+          return expect(test_promise).to.be.rejected;
+        });
+      });
+
+      it('Unlock', function() {
         let key = new Uint8Array(16);
 
         let test_promise = Promise.resolve()
@@ -610,7 +700,7 @@
 
       const TEST_KEY = [0,1,2,3,4,5,6,7,8,9,0,1,2,3,4,5];
 
-      it.skip('Lock with key', function() {
+      it('Lock with key', function() {
         this.timeout(0);
         let old_key = new Uint8Array(16);
         let new_key = new Uint8Array(TEST_KEY);
@@ -624,7 +714,7 @@
         return expect(test_promise).to.eventually.eql([0]);
       });
 
-      it.skip('Unlock with Key', function() {
+      it('Unlock with Key', function() {
         this.timeout(0);
         let key = new Uint8Array(TEST_KEY);
 
@@ -633,26 +723,132 @@
             .then(data => encrypt(key, data))
             .then(reverse)
             .then(unlock_token => {
-              console.log('Generated token');
-              console.log(toUint8Array(unlock_token));
               return unlock().writeValue(unlock_token);
             })
             .then(() => lock_state().readValue())
             .then(toUint8Array);
         return expect(test_promise).to.eventually.eql([1]);
       });
-
-      [2, 16, 18].forEach(length => {
-        it('Write length ' + length, function() {
-          this.timeout(0);
-          let test_promise = Promise.resolve()
-              .then(() => lock_state().readValue())
-              .then(() => lock_state().writeValue(new Uint8Array(length)))
-          return expect(test_promise).to.be.rejected;
-        });
-      });
     });
 
+    describe('Adv. Slot Data', function() {
+      this.timeout(0);
+      it('Reset', function() {
+        return expect(factory_reset().writeValue(new Uint8Array([0xb0])))
+          .to.be.fulfilled;
+      });
+      
+      it('Disable', function() {
+        this.timeout(0);
+        if (cached.capabilities.capabilities.variable_adv_supported) {
+          let base_value = new DataView(new ArrayBuffer(2));
+          base_value.setInt16(0, 1000, false);
+          let base_url = new Uint8Array([0x10, 0, 1, 2, 3, 4]);
+          let disable_value = new DataView(new ArrayBuffer(2));
+          disable_value.setInt16(0, 0, false);
+
+          let test_promise = Promise.resolve();
+          let values_written = [];
+          let values_read = [];
+
+          let reset = () => {
+            let promise = Promise.resolve();
+            for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
+              promise = promise.then(() => active_slot().writeValue(new Uint8Array([i])))
+                .then(() => advertising_interval().writeValue(base_value))
+                .then(() => adv_slot_data().writeValue(base_url));
+            }
+            return promise;
+          };
+
+          for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
+            test_promise = test_promise.then(() => reset());
+            for (let j = 0; j < cached.capabilities.max_supported_total_slots; j++) {
+              if (i === j) {
+                test_promise = test_promise
+                  .then(() => active_slot().writeValue(new Uint8Array([j])))
+                  .then(() => advertising_interval().writeValue(disable_value));
+                values_written.push([]);
+              } else {
+                values_written.push(toUint8Array(base_url));
+              }
+            }
+            for (let j = 0; j < cached.capabilities.max_supported_total_slots; j++) {
+              test_promise = test_promise
+                .then(() => active_slot().writeValue(new Uint8Array([j])))
+                .then(() => adv_slot_data().readValue())
+                .then(toUint8Array)
+                .then(val => {
+                  values_read.push(val);
+                });
+            }
+          }
+
+          test_promise = test_promise.then(() => {
+            console.log('Values read');
+            console.log(values_read)
+          });
+
+          test_promise = test_promise.then(() => {
+            console.log('Values written');
+            console.log(values_written)
+          });
+
+          return expect(test_promise.then(() => values_read))
+            .to.eventually.eql(values_written);
+        } else {
+          return expect(Promise.reject()).to.be.fulfilled;
+        }
+      });
+
+      it('Reset', function() {
+        return expect(factory_reset().writeValue(new Uint8Array([0xb0])))
+          .to.be.fulfilled;
+      });
+      
+      it('Write URL', function() {
+        this.timeout(0);
+        if (cached.capabilities.capabilities.variable_adv_supported) {
+          let url = [0x10, 0, 1, 2, 3];
+          let base_url = new Uint8Array(url);
+
+          let values_read = [];
+          let values_written = [];
+
+          let test_promise = Promise.resolve();
+
+          for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
+            test_promise = test_promise
+              .then(() => changeToSlot(i))
+              .then(() => adv_slot_data().writeValue(base_url));
+            values_written.push([0x10, -13, 0, 1, 2, 3]);
+          }
+
+          for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
+            test_promise = test_promise
+              .then(() => changeToSlot(i))
+              .then(() => adv_slot_data().readValue())
+              .then(toInt8Array)
+              .then(v => values_read.push(v));
+          }
+
+          test_promise = test_promise.then(() => {
+            console.log('Values read');
+            console.log(values_read)
+          });
+
+          test_promise = test_promise.then(() => {
+            console.log('Values written');
+            console.log(values_written)
+          });
+
+          return expect(test_promise.then(() => values_written))
+                                    .to.eventually.eql(values_read);
+        } else {
+          return expect(Promise.reject()).to.be.fulfilled;
+        }
+      });
+    });
     // TODO: Public ECDH Key
     // TODO: EID Identity Key
   });
