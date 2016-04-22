@@ -44,6 +44,17 @@
       });
   };
 
+  let toLockState = (val) => {
+    let lock_s = toUint8Array(val)[0];
+    if (lock_s == 0)
+      return 'locked';
+    if (lock_s == 1)
+      return 'unlocked';
+    if (lock_s == 2)
+      return 'unlocked, relock disabled';
+    return 'unknown';
+  }
+
   let getLockValue = (old_key, new_key) => {
     return encrypt(old_key, new_key)
       .then(reverse)
@@ -82,7 +93,7 @@
     if (properties.read)
       properties_array.push('read');
     if (properties.writeWithoutResponse)
-      properties_array.push('writeWithoutResponse');
+      properxties_array.push('writeWithoutResponse');
     if (properties.write)
       properties_array.push('write');
     if (properties.notify)
@@ -119,18 +130,18 @@
   let eid_identity_key = () => window.characteristics.get(
     'a3c87509-8ed3-4bdf-8a39-a01bebede295');
   let adv_slot_data = () => window.characteristics.get(
-    'a3c8750A-8ed3-4bdf-8a39-a01bebede295');
+    'a3c8750a-8ed3-4bdf-8a39-a01bebede295');
   let factory_reset = () => window.characteristics.get(
-    'a3c8750B-8ed3-4bdf-8a39-a01bebede295');
+    'a3c8750b-8ed3-4bdf-8a39-a01bebede295');
   let remain_connectable = () => window.characteristics.get(
-    'a3c8750C-8ed3-4bdf-8a39-a01bebede295');
+    'a3c8750c-8ed3-4bdf-8a39-a01bebede295');
 
   let getCapabilities = () => {
     return capabilities()
         .readValue()
         .then(toInt8Array)
         .then(val => {
-          return {
+          let caps = {
             'version': val[0],
             'max_supported_total_slots': val[1],
             'max_supported_eid_slots': val[2],
@@ -139,17 +150,47 @@
               'variable_tx_power_supported': !!(val[3] & 0x02),
               'updated_key_unencrypted': !!(val[3] & 0x04)
             },
-            'supported_frame_types_bit_field': [val[4], val[5]],
+            'supported_frame_types_bit_field': (() => {
+              let supported_frame_types_bits = (val[5] << 4) | val[4];
+              let array = [];
+
+              if (!!(supported_frame_types_bits & 0x01))
+                array.push('uid');
+              if (!!(supported_frame_types_bits & 0x02))
+                array.push('url');
+              if (!!(supported_frame_types_bits & 0x04))
+                array.push('tlm');
+              if (!!(supported_frame_types_bits & 0x8))
+                array.push('eid');
+              if (!!(supported_frame_types_bits & 0xFFF0))
+                array.push('unknown');
+              return array;
+            })(),
             'supported_radio_tx_power': val.slice(6)
           };
+          console.log(caps);
+          return caps;
         });
+  };
+
+  const EXPECTED_CAPABILITIES = {
+    'version': 0x00,
+    'max_supported_total_slots': 0x03,
+    'max_supported_eid_slots': 0x03,
+    'capabilities': {
+      'variable_adv_supported': true,
+      'variable_tx_power_supported': true,
+      'update_key_unencryped': false
+    },
+    'supported_frame_types_bit_field': ['uid', 'url', 'tlm', 'eid'],
+    'supported_radio_tx_power': []
   };
 
   window.BluetoothRemoteGATTServer.prototype.discoverService = function(service_uuid) {
     let self = this;
     return this.getPrimaryService(CONFIG_UUID)
       .then(service => {
-        console.log('Service discovered...');
+        console.log('Service discovered: ' + service.uuid);
         return service.getCharacteristics();
       })
       .then(characteristics => {
@@ -157,13 +198,22 @@
         this.characteristics = new Map();
         for (let characteristic of characteristics) {
           this.characteristics.set(characteristic.uuid, characteristic);
+          console.log('Characteristic discovered: ' + characteristic.uuid);
         }
         return this.characteristics;
       });
   };
 
   describe('Core Eddystone-URL Tests', function() {
-    let caps_obj;
+    let cached = {};
+    cached.capabilities;
+    cached.active_slot = 0;
+    cached.advertising_intervals = [];
+    cached.radio_tx_powers = [];
+    cached.advertised_tx_powers;
+    cached.lock_state;
+    cached.adv_slot_data = [];
+
     before(function(done) {
       this.timeout(0);
       navigator.bluetooth
@@ -182,7 +232,53 @@
         });
     });
 
-    describe.skip('Capabilities', function() {
+    describe('Factory Reset', function() {
+      it('Characteristic Properties', () => {
+        expect(toPropertiesArray(factory_reset()))
+          .to.eql(['write']);
+      });
+      it('Cache default values', () => {
+        let test_promise = factory_reset().writeValue(new Uint8Array([0x0b]))
+            .then(() => getCapabilities())
+            .then(c => cached.capabilities = c)
+            .then(() => active_slot().readValue())
+            .then(toUint8Array)
+            .then(a => cached.active_slot = a[0])
+            .then(() => {
+              let a_promise = Promise.resolve();
+              for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
+                a_promise = a_promise
+                    .then(() => active_slot().writeValue(new Uint8Array([i])))
+                    .then(() => advertising_interval().readValue())
+                    .then(val => val.getInt16(0, false))
+                    .then(val => cached.advertising_intervals.push(val));
+              }
+              return a_promise;
+            })
+            .then(() => {
+              let r_promise = Promise.resolve();
+              for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
+                r_promise = r_promise
+                  .then(() => active_slot().writeValue(new Uint8Array([i])))
+                  .then(() => radio_tx_power().readValue())
+                  .then(toInt8Array)
+                  .then(val => cached.radio_tx_powers.push(val[0]));
+              }
+              return r_promise;
+            })
+            .then(() => advertised_tx_power().readValue())
+            .then(toInt8Array)
+            .then(val => cached.advertised_tx_power = val[0])
+            .then(() => lock_state().readValue())
+            .then(toLockState)
+            .then(val => cached.lock_state = val)
+        
+
+        return expect(test_promise).to.be.fulfilled;
+      });
+    });
+
+    describe('Capabilities', function() {
       it('Characteristic Properties', () => {
         expect(toPropertiesArray(capabilities()))
           .to.eql(['read']);
@@ -194,23 +290,18 @@
           .then(toInt8Array))
           .to.eventually.have.length.of.at.least(6);
       });
-      it('Version should be 0x01', function() {
+
+      it('Check Capabilities', function() {
         this.timeout(0);
-        return expect(capabilities()
-          .readValue()
-          .then(val => toInt8Array(val)[0]))
-          .to.eventually.equal(0x00);
+        return expect(getCapabilities()).to.eventually.eql(EXPECTED_CAPABILITIES);
       });
+
       it('Capabilities bit field RFU', function() {
         this.timeout(0);
         return expect(capabilities()
           .readValue()
           .then(val => !!(toInt8Array(val)[3] & 0b11111000)))
           .to.eventually.be.false;
-      });
-      it('Cache Capabilities', function() {
-        return expect(getCapabilities().then(c => caps_obj = c))
-          .to.be.fulfilled;
       });
     });
 
@@ -223,12 +314,12 @@
 
       it('Write and Read', function() {
         this.timeout(0);
-        this.test.title += ' (' + caps_obj.max_supported_total_slots +
+        this.test.title += ' (' + cached.capabilities.max_supported_total_slots +
                            ' slots)';
         let values_read = [];
         let values_written = [];
         let test_promise = Promise.resolve();
-        for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+        for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
           values_written.push([i]);
           test_promise = test_promise
             .then(() => active_slot().writeValue(new Uint8Array([i])))
@@ -243,7 +334,7 @@
       it('Write a value bigger than what the capabilities allow', function() {
         this.timeout(0);
         return expect(active_slot()
-          .writeValue(new Uint8Array([caps_obj.max_supported_total_slots])))
+          .writeValue(new Uint8Array([cached.capabilities.max_supported_total_slots])))
         .to.be.rejected;
       });
 
@@ -263,10 +354,10 @@
       let values_written = [];
       it('Write', function() {
         this.timeout(0);
-        if (caps_obj.capabilities.variable_adv_supported) {
+        if (cached.capabilities.capabilities.variable_adv_supported) {
           this.test.title = 'Write (Variable Adv)';
           let test_promise = Promise.resolve();
-          for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+          for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
             let val = 500 + i;
             // TODO: Find a better way to write big endian.
             let dataView = new DataView(new ArrayBuffer(2));
@@ -283,11 +374,11 @@
       });
       it('Read', function() {
         this.timeout(0);
-        if (caps_obj.capabilities.variable_adv_supported) {
+        if (cached.capabilities.capabilities.variable_adv_supported) {
           this.test.title = 'Read (Variable Adv)';
           let values_read = [];
           let test_promise = Promise.resolve();
-          for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+          for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
             test_promise = test_promise
               .then(() => active_slot().writeValue(new Uint8Array([i])))
               .then(() => advertising_interval().readValue())
@@ -303,7 +394,7 @@
 
       it('Write and Read Min', function() {
         this.timeout(0);
-        if (caps_obj.capabilities.variable_adv_supported) {
+        if (cached.capabilities.capabilities.variable_adv_supported) {
           let base_value = new DataView(new ArrayBuffer(2));
           base_value.setInt16(0, 1000, false);
           let min_value = new DataView(new ArrayBuffer(2));
@@ -316,16 +407,16 @@
 
           let reset = () => {
             let promise = Promise.resolve();
-            for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+            for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
               promise = promise.then(() => active_slot().writeValue(new Uint8Array([i])))
                 .then(() => advertising_interval().writeValue(base_value));
             }
             return promise;
           };
 
-          for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+          for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
             test_promise = test_promise.then(() => reset());
-            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+            for (let j = 0; j < cached.capabilities.max_supported_total_slots; j++) {
               if (i === j) {
                 test_promise = test_promise
                   .then(() => active_slot().writeValue(new Uint8Array([j])))
@@ -334,7 +425,7 @@
                 base_values_written.push(base_value.getInt16(0, false));
               }
             }
-            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+            for (let j = 0; j < cached.capabilities.max_supported_total_slots; j++) {
               test_promise = test_promise
                 .then(() => active_slot().writeValue(new Uint8Array([j])))
                 .then(() => advertising_interval().readValue())
@@ -358,7 +449,7 @@
       });
       it('Write and Read Max', function() {
         this.timeout(0);
-        if (caps_obj.capabilities.variable_adv_supported) {
+        if (cached.capabilities.capabilities.variable_adv_supported) {
           let base_value = new DataView(new ArrayBuffer(2));
           base_value.setInt16(0, 1000, false);
           let max_value = new DataView(new ArrayBuffer(2));
@@ -371,16 +462,16 @@
 
           let reset = () => {
             let promise = Promise.resolve();
-            for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+            for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
               promise = promise.then(() => active_slot().writeValue(new Uint8Array([i])))
                 .then(() => advertising_interval().writeValue(base_value));
             }
             return promise;
           };
 
-          for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+          for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
             test_promise = test_promise.then(() => reset());
-            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+            for (let j = 0; j < cached.capabilities.max_supported_total_slots; j++) {
               if (i === j) {
                 test_promise = test_promise
                   .then(() => active_slot().writeValue(new Uint8Array([j])))
@@ -389,7 +480,7 @@
                 base_values_written.push(base_value.getInt16(0, false));
               }
             }
-            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+            for (let j = 0; j < cached.capabilities.max_supported_total_slots; j++) {
               test_promise = test_promise
                 .then(() => active_slot().writeValue(new Uint8Array([j])))
                 .then(() => advertising_interval().readValue())
@@ -413,7 +504,7 @@
       });
       it('Disable', function() {
         this.timeout(0);
-        if (caps_obj.capabilities.variable_adv_supported) {
+        if (cached.capabilities.capabilities.variable_adv_supported) {
           let base_value = new DataView(new ArrayBuffer(2));
           base_value.setInt16(0, 1000, false);
           let disable_value = new DataView(new ArrayBuffer(2));
@@ -425,16 +516,16 @@
 
           let reset = () => {
             let promise = Promise.resolve();
-            for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+            for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
               promise = promise.then(() => active_slot().writeValue(new Uint8Array([i])))
                 .then(() => advertising_interval().writeValue(base_value));
             }
             return promise;
           };
 
-          for (let i = 0; i < caps_obj.max_supported_total_slots; i++) {
+          for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
             test_promise = test_promise.then(() => reset());
-            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+            for (let j = 0; j < cached.capabilities.max_supported_total_slots; j++) {
               if (i === j) {
                 test_promise = test_promise
                   .then(() => active_slot().writeValue(new Uint8Array([j])))
@@ -444,7 +535,7 @@
                 values_written.push(1000);
               }
             }
-            for (let j = 0; j < caps_obj.max_supported_total_slots; j++) {
+            for (let j = 0; j < cached.capabilities.max_supported_total_slots; j++) {
               test_promise = test_promise
                 .then(() => active_slot().writeValue(new Uint8Array([j])))
                 .then(() => advertising_interval().readValue())
@@ -460,6 +551,9 @@
         }
       });
     });
+
+    // TODO: Radio Tx Power
+    // TODO: Advertised Tx Power
 
     describe('Lock', function() {
       it('Lock State Properties', () => {
@@ -558,5 +652,8 @@
         });
       });
     });
+
+    // TODO: Public ECDH Key
+    // TODO: EID Identity Key
   });
 })();
