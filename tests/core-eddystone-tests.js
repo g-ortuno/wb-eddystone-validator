@@ -192,7 +192,7 @@
       'update_key_unencrypted': false // TODO: Remove.
     },
     'supported_frame_types_bit_field': ['uid', 'url', 'tlm'],
-    'supported_radio_tx_power': [-30, -16, -4, 4]
+    'supported_radio_tx_power': [-20, -12, -4, 4]
   };
 
   window.BluetoothRemoteGATTServer.prototype.discoverService = function(service_uuid) {
@@ -884,6 +884,7 @@
           for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
             test_promise = test_promise
               .then(() => changeToSlot(i))
+              .then(() => advertising_interval().writeValue(new Int8Array([3, -24])))
               .then(() => adv_slot_data().writeValue(base_url));
             values_written.push([0x10,
                                  cached.advertised_tx_powers[i],
@@ -935,6 +936,7 @@
           for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
             test_promise = test_promise
                 .then(() => changeToSlot(i))
+                .then(() => advertising_interval().writeValue(new Int8Array([3, -24])))
                 .then(() => adv_slot_data().writeValue(base_url));
             values_written.push([0x10, cached.advertised_tx_powers[i]]);
           }
@@ -979,6 +981,7 @@
           for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
             test_promise = test_promise
                 .then(() => changeToSlot(i))
+                .then(() => advertising_interval().writeValue(new Int8Array([3, -24])))
                 .then(() => adv_slot_data().writeValue(base_url));
             values_written.push([frame_type,
                                  cached.advertised_tx_powers[i],
@@ -1025,6 +1028,7 @@
           for (let i = 0; i < cached.capabilities.max_supported_total_slots; i++) {
             let test_promise = Promise.resolve()
                 .then(() => changeToSlot(i))
+                .then(() => advertising_interval().writeValue(new Int8Array([3, -24])))
                 .then(() => adv_slot_data().writeValue(base_url));
             test_promises.push(expect(test_promise).to.be.rejected);
           }
