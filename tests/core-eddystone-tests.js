@@ -227,7 +227,7 @@
         .requestDevice({filters: [{services: [CONFIG_UUID]}]}).then(device => {
           console.log('Found device...');
           window.device = device;
-          return device.connectGATT();
+          return device.gatt.connect();
         }).then(gattServer => {
           console.log('Connected to device...');
           return gattServer.discoverService(CONFIG_UUID);

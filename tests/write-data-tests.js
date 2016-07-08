@@ -15,7 +15,7 @@
       navigator.bluetooth
         .requestDevice({filters: [{services: [CONFIG_UUID]}]}).then(device => {
           console.log('Found Device...');
-          return device.connectGATT();
+          return device.gatt.connect();
         }).then(gattServer => {
           console.log('Connected to device...');
           return gattServer.getPrimaryService(CONFIG_UUID);
